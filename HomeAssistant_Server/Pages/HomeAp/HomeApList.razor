@@ -1,0 +1,121 @@
+﻿@page "/home-apartament"
+
+@using Business.Repository.IRepository
+@using Models
+@inject IHomeApRepository HomeApRepository
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JsRuntime
+@inject HomeAssistant_Server.Service.IService.IFileUpload FileUpload
+
+@*@attribute [Authorize(Roles = CommonFiles.SD.Role_Admin)]*@
+<div class = "row mt-4">
+    <div class = "col-8">
+        <h4 class = "card-title text-info">Home Apartaments</h4>
+    </div>
+    <div class = "col-3 offset-1">
+        <NavLink href = "home-apartament/create" class = "btn btn-primary btn-alert-info form-control">Add New Apartament</NavLink>
+    </div>
+</div>
+
+
+<div class = "row mt-4">
+    <div class = "col-12">
+        <table class = "table table-bordered table-hover">
+            <thead>
+                <tr>
+                    <td>Name</td>
+                    <td>Occupancy</td>
+                    <td>Price</td>
+                    <td>Square Feet</td>
+                    <td></td>
+                </tr>
+            </thead>
+            <tbody>
+               @try{
+
+              
+                @if (Apartaments.Any())
+                {
+
+                    foreach(var apartament in Apartaments)
+                    {
+                         <tr >
+                            <td>@apartament.Name</td>
+                             <td>@apartament.Occupancy</td>
+                              <td>@apartament.Rate.ToString("c")</td>
+                               <td>@apartament.SqFt</td>
+                                  <td> <NavLink href="@($"home-apartament/edit/{apartament.Id}")" class="btn btn-primary">Edit</NavLink>
+                                <button class = "btn btn-danger" @onclick="()=>HandleDelete(apartament.Id)">Delete</button></td>
+                        </tr>
+
+                    }
+                }
+                else
+                {
+                    <td colspan = 5>No Homes Found!</td>
+
+                    }
+                }
+                catch(Exception ex){
+                    throw ex;
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<DeleteConfirmation ConfirmationChanged="ConfirmDelete_Click"></DeleteConfirmation>
+
+@code {
+
+    //when page initialised, create list
+
+    private IEnumerable<HomeApDTO> Apartaments { get; set; } = new List<HomeApDTO>();
+
+    private int? DeleteApartamentId { get; set; } = null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        //populate the apartaments and show them to the user
+
+        Apartaments = await HomeApRepository.GetAllHomeAp();
+    }
+
+    private void RedirectTo(int apartamentId)
+    {
+        NavigationManager.NavigateTo($"home-apartament/edit/{apartamentId}");
+    }
+
+
+    private async Task HandleDelete(int apartamentId)
+    {
+
+        DeleteApartamentId = apartamentId;
+        await JsRuntime.InvokeVoidAsync("ShowDeleteConfirmationModal");
+
+    }
+
+    public async Task ConfirmDelete_Click(bool isConfirmed)
+    {
+        if (isConfirmed && DeleteApartamentId != null)
+        {
+
+            HomeApDTO homeAp = await HomeApRepository.GetHomeAp(DeleteApartamentId.Value);
+            foreach (var image in homeAp.HomeApImages)
+            {
+                var imageName = image.ApartamentImageURL.Replace($"{NavigationManager.BaseUri}ApartamentImages/", "");
+                FileUpload.DeleteFile(imageName);
+
+            }
+            //once the images are deleted, delete the home apartament by its id
+            await HomeApRepository.DeleteHomeAp(DeleteApartamentId.Value);
+            await JsRuntime.ToastrSuccess("Home Apartament Deleted");
+
+            //re-populate the list of apartaments
+            Apartaments = await HomeApRepository.GetAllHomeAp();
+        }
+                await JsRuntime.InvokeVoidAsync("HideDeleteConfirmationModal");
+
+    }
+
+}

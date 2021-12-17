@@ -1,0 +1,344 @@
+﻿@page "/home-apartament/create"
+@page "/home-apartament/edit/{Id:int}"
+@using Models
+@using Business.Repository.IRepository
+@using HomeAssistant_Server.Service.IService
+@inject IHomeApRepository HomeApRepository
+@inject IHomeImagesRepository HomeImagesRepository
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JsRuntime
+@inject IFileUpload FileUpload
+@*@attribute [Authorize(Roles = CommonFiles.SD.Role_Admin)]*@
+
+<div class="row mt-2 mb-5">
+    <h3 class="card-title text-info mb-3 ml-3">@Title Home Apartament</h3>
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-body">
+                <EditForm Model="HomeApModel" OnValidSubmit="HandleHomeApUpsert">
+                    <DataAnnotationsValidator />
+                    @*<ValidationSummary />*@
+                    <div class="form-group">
+                        <label>Name</label>
+                        <InputText @bind-Value="HomeApModel.Name" class="form-control"></InputText>
+                        <ValidationMessage For="()=>HomeApModel.Name"></ValidationMessage>
+                    </div>
+                    <div class="form-group">
+                        <label>Occupancy</label>
+                        <InputNumber @bind-Value="HomeApModel.Occupancy" class="form-control"></InputNumber>
+                        <ValidationMessage For="()=>HomeApModel.Occupancy"></ValidationMessage>
+                    </div>
+                    <div class="form-group">
+                        <label>Rate</label>
+                        <InputNumber @bind-Value="HomeApModel.Rate" class="form-control"></InputNumber>
+                        <ValidationMessage For="()=>HomeApModel.Rate"></ValidationMessage>
+                    </div>
+                    <div class="form-group">
+                        <label>Sq ft.</label>
+                        <InputText @bind-Value="HomeApModel.SqFt" class="form-control"></InputText>
+                    </div>
+                    <div class="form-group" style="height:250px">
+                        <label>Details</label>
+                        <BlazoredTextEditor @ref="@QuillHtml" Placeholder="Enter Apartament Details">
+                            <ToolbarContent>
+                                <select class="ql-header">
+                                    <option selected=""></option>
+                                    <option value="1"></option>
+                                    <option value="2"></option>
+                                    <option value="3"></option>
+                                    <option value="4"></option>
+                                    <option value="5"></option>
+                                </select>
+                                <span class="ql-formats">
+                                    <button class="ql-bold"></button>
+                                    <button class="ql-italic"></button>
+                                    <button class="ql-underline"></button>
+                                    <button class="ql-strike"></button>
+                                </span>
+                                <span class="ql-formats">
+                                    <select class="ql-color"></select>
+                                    <select class="ql-background"></select>
+                                </span>
+                                <span class="ql-formats">
+                                    <button class="ql-list" value="ordered"></button>
+                                    <button class="ql-list" value="bullet"></button>
+                                </span>
+                                <span class="ql-formats">
+                                    <button class="ql-link"></button>
+                                </span>
+                            </ToolbarContent>
+                            <EditorContent>
+
+                            </EditorContent>
+                        </BlazoredTextEditor>
+                    </div>
+                    <div class="form-group" style="padding-top:70px">
+                        <InputFile OnChange="HandleImageUpload" multiple></InputFile>
+                        <div class="row">
+                            @if (IsImageUploadProcessStarted)
+                            {
+                                <div class="col-md-12">
+                                    <span><i class="fa fa-spin fa-spinner"></i> Please wait.. Images are uploading...</span>
+                                </div>
+                            }
+                            @if (HomeApModel.ImageUrls != null && HomeApModel.ImageUrls.Count > 0)
+                            {
+                                int serial = 1;
+                                foreach (var apartamentImage in HomeApModel.ImageUrls)
+                                {
+                                    <div class="col-md-2 mt-3">
+                                        <div class="apartament-image" style="background: url('@apartamentImage') 50% 50%; ">
+                                            <span class="apartament-image-title">@serial</span>
+                                        </div>
+
+                                        <button type="button" @onclick="()=>DeletePhoto(apartamentImage)" class="btn btn-outline-danger btn-block mt-4">
+                                            Delete
+                                        </button>
+                                    </div>
+                                    serial++;
+                                }
+                            }
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-primary">@Title Apartament</button>
+                        <NavLink href="home-apartament" class="btn btn-secondary">Back to Index</NavLink>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+
+    [Parameter]
+    //determines whether create or edit
+    public int? Id { get; set; }
+
+    private HomeApDTO HomeApModel { get; set; } = new HomeApDTO();
+
+    private string Title { get; set; } = "Create";
+
+    private HomeApImageDTO ApartamentImage { get; set; } = new HomeApImageDTO();
+
+    private List<string> DeletedImageNames { get; set; }
+
+    public BlazoredTextEditor QuillHtml { get; set; } = new BlazoredTextEditor();
+
+    [CascadingParameter]
+    public Task<AuthenticationState> AuthenticationState{ get; set; }
+
+
+    private bool IsImageUploadProcessStarted { get; set; } = false;
+
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authenticationState = await AuthenticationState;
+
+        //check if admin is logged in
+        if (!authenticationState.User.IsInRole(CommonFiles.SD.Role_Admin))
+        {
+            var uri = new Uri(NavigationManager.Uri);
+            NavigationManager.NavigateTo($"/identity/account/login?returnUrl={uri.LocalPath}");
+        }
+
+        if (Id != null)
+        {
+            //updating
+            Title = "Update";
+            HomeApModel = await HomeApRepository.GetHomeAp(Id.Value);
+            if (HomeApModel?.HomeApImages != null)
+            {
+                HomeApModel.ImageUrls = HomeApModel.HomeApImages.Select(u => u.ApartamentImageURL).ToList();
+            }
+        }
+        else
+        {
+            //create
+            HomeApModel = new HomeApDTO();
+        }
+
+    }
+
+    protected async override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+        bool loading = true;
+        while (loading)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(HomeApModel.Details))
+                {
+                    await this.QuillHtml.LoadHTMLContent(HomeApModel.Details);
+                }
+                loading = false;
+            }
+            catch
+            {
+                await Task.Delay(10);
+                loading = false;
+            }
+
+        }
+        if (!string.IsNullOrEmpty(HomeApModel.Details))
+        {
+            await this.QuillHtml.LoadHTMLContent(HomeApModel.Details);
+        }
+    }
+
+    private async Task HandleHomeApUpsert()
+    {
+        try
+        {
+
+
+            if (HomeApModel.Id != 0 && Title == "Update")
+            {
+
+                //if the Id is not null, we're updating the home apartament
+                HomeApModel.Details = await QuillHtml.GetHTML();
+
+
+                //update
+
+                var updateApartamentResult = await HomeApRepository.UpdateHomeAp(HomeApModel.Id, HomeApModel);
+
+                if (HomeApModel.ImageUrls != null && HomeApModel.ImageUrls.Any())
+                {
+                    if (DeletedImageNames != null && DeletedImageNames.Any())
+                    {
+                        foreach (var deletedImageName in DeletedImageNames)
+                        {
+                            var imageName = deletedImageName.Replace($"{NavigationManager.BaseUri}ApartamentImages/", "");
+
+                            var result = FileUpload.DeleteFile(imageName);
+                            await HomeImagesRepository.DeleteHomeImageByImageUrl(deletedImageName);
+                        }
+                    }
+
+
+
+                    await AddHomeApImage(updateApartamentResult);
+                }
+                await JsRuntime.ToastrSuccess("Home apartament updated successfully.");
+            }
+            else
+            {
+                //create
+                HomeApModel.Details = await QuillHtml.GetHTML();
+                var createdResult = await HomeApRepository.CreateHomeAp(HomeApModel);
+                await AddHomeApImage(createdResult);
+                await JsRuntime.ToastrSuccess("Home apartament created successfully.");
+            }
+        }
+        catch (Exception ex)
+        {
+            //log exceptions
+        }
+
+
+
+        NavigationManager.NavigateTo("home-apartament");
+    }
+
+    private async Task HandleImageUpload(InputFileChangeEventArgs e)
+    {
+        IsImageUploadProcessStarted = true;
+        try
+        {
+            var images = new List<string>();
+            if (e.GetMultipleFiles().Count > 0)
+            {
+                foreach (var file in e.GetMultipleFiles())
+                {
+                    System.IO.FileInfo fileInfo = new System.IO.FileInfo(file.Name);
+                    if (fileInfo.Extension.ToLower() == ".jpg" ||
+                        fileInfo.Extension.ToLower() == ".png" ||
+                        fileInfo.Extension.ToLower() == ".jpeg")
+                    {
+                        var uploadedImagePath = await FileUpload.UploadFile(file);
+                        images.Add(uploadedImagePath);
+                    }
+                    else
+                    {
+                        await JsRuntime.ToastrError("Please select .jpg/.jpeg/.png file only");
+                        return;
+                    }
+                }
+
+                if (images.Any())
+                {
+                    if (HomeApModel.ImageUrls != null && HomeApModel.ImageUrls.Any())
+                    {
+                        HomeApModel.ImageUrls.AddRange(images);
+                    }
+                    else
+                    {
+                        HomeApModel.ImageUrls = new List<string>();
+                        HomeApModel.ImageUrls.AddRange(images);
+                    }
+                }
+                else
+                {
+                    await JsRuntime.ToastrError("Image uploading failed");
+                    return;
+                }
+            }
+            IsImageUploadProcessStarted = false;
+        }
+        catch (Exception ex)
+        {
+            await JsRuntime.ToastrError(ex.Message);
+        }
+
+
+
+    }
+
+    private async Task AddHomeApImage(HomeApDTO apartamentDetails)
+    {
+        foreach (var imageUrl in HomeApModel.ImageUrls)
+        {
+            if (HomeApModel.HomeApImages.Where(x => x.ApartamentImageURL == imageUrl).Count() == 0)
+            {
+
+                ApartamentImage = new HomeApImageDTO()
+                    {
+                        ApartamentId = apartamentDetails.Id,
+                        ApartamentImageURL = imageUrl
+                    };
+                await HomeImagesRepository.CreateHomeApImage(ApartamentImage);
+            }
+        }
+    }
+
+    private async Task DeletePhoto(string imageUrl)
+    {
+        try
+        {
+            var imageIndex = HomeApModel.ImageUrls.FindIndex(x => x == imageUrl);
+            var imageName = imageUrl.Replace($"{NavigationManager.BaseUri}ApartamentImages/", "");
+            if (HomeApModel.Id == 0 && Title == "Create")
+            {
+                var result = FileUpload.DeleteFile(imageName);
+            }
+            else
+            {
+                //update
+                DeletedImageNames ??= new List<string>();
+                DeletedImageNames.Add(imageUrl);
+            }
+            HomeApModel.ImageUrls.RemoveAt(imageIndex);
+        }
+        catch (Exception ex)
+        {
+            await JsRuntime.ToastrError(ex.Message);
+        }
+    }
+}
